@@ -8,6 +8,7 @@ from cryptography.exceptions import InvalidSignature
 import tkinter as tk
 from tkinter import scrolledtext, messagebox, ttk
 
+"""
 # Diffie-Hellman setup and key exchange functions
 def dh_setup(generator, key_size):
     parameters = dh.generate_parameters(generator=generator, key_size=key_size)
@@ -111,10 +112,12 @@ def process_next_step():
         Alice_shared_key = dh_generate_shared_key(Alice_dh_private_key, Bob_dh_public_key)
         output_text.insert(tk.INSERT, "Step 9: Alice generates shared key\n")
         Alice_shared_key_label.config(text=f"Alice's Shared Key:\n{Alice_shared_key.hex()}")
+        print(Alice_shared_key.hex())
     elif step == 10:
         Bob_shared_key = dh_generate_shared_key(Bob_dh_private_key, Alice_dh_public_key)
         output_text.insert(tk.INSERT, "Step 10: Bob generates shared key\n")
         Bob_shared_key_label.config(text=f"Bob's Shared Key:\n{Bob_shared_key.hex()}")
+        print(Bob_shared_key.hex())
         output_text.insert(tk.INSERT, "\n\nShared Keys Match: {}\n".format(Alice_shared_key == Bob_shared_key))
         output_text.config(state=tk.DISABLED)
         completed = True
@@ -210,3 +213,141 @@ Bob_shared_key_label = tk.Label(keys_frame, text="Bob's Shared Key:", font=("Ari
 Bob_shared_key_label.pack(fill=tk.X)
 
 root.mainloop()
+"""
+
+import tkinter as tk
+from tkinter import ttk, scrolledtext
+from cryptography.hazmat.primitives.asymmetric import rsa, padding, dh
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.exceptions import InvalidSignature
+from sympy import isprime, primitive_root
+import random
+
+
+def generate_dh_params(key_size):
+    # 随机生成一个大素数 p
+    while True:
+        parameters = dh.generate_parameters(generator=2, key_size=key_size)
+        p = parameters.parameter_numbers().p
+        if isprime(p):
+            break
+    # 找到 p 的一个原根 g
+    g = primitive_root(p)
+    parameters = dh.DHParameterNumbers(p, g).parameters()
+    return parameters, p, g
+
+
+def generate_dh_keys(parameters):
+    private_key = parameters.generate_private_key()
+    public_key = private_key.public_key()
+    return private_key, public_key
+
+
+def generate_shared_key(private_key, peer_public_key):
+    shared_key = private_key.exchange(peer_public_key)
+    return shared_key
+
+
+def generate_rsa_keys():
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = private_key.public_key()
+    return private_key, public_key
+
+
+def sign_data(private_key, data):
+    signature = private_key.sign(
+        data,
+        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+        hashes.SHA256()
+    )
+    return signature
+
+
+def verify_signature(public_key, data, signature):
+    try:
+        public_key.verify(
+            signature,
+            data,
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+            hashes.SHA256()
+        )
+        return True
+    except InvalidSignature:
+        return False
+
+
+def start_key_exchange():
+    # 清空当前结果
+    output_text.config(state=tk.NORMAL)
+    output_text.delete(1.0, tk.END)
+
+    key_size = int(key_size_var.get())
+    parameters, p, g = generate_dh_params(key_size)
+
+    alice_dh_private_key, alice_dh_public_key = generate_dh_keys(parameters)
+    bob_dh_private_key, bob_dh_public_key = generate_dh_keys(parameters)
+
+    alice_rsa_private_key, alice_rsa_public_key = generate_rsa_keys()
+    bob_rsa_private_key, bob_rsa_public_key = generate_rsa_keys()
+
+    alice_dh_public_bytes = alice_dh_public_key.public_bytes(encoding=serialization.Encoding.PEM,
+                                                             format=serialization.PublicFormat.SubjectPublicKeyInfo)
+    bob_dh_public_bytes = bob_dh_public_key.public_bytes(encoding=serialization.Encoding.PEM,
+                                                         format=serialization.PublicFormat.SubjectPublicKeyInfo)
+
+    alice_signature = sign_data(alice_rsa_private_key, alice_dh_public_bytes)
+    bob_signature = sign_data(bob_rsa_private_key, bob_dh_public_bytes)
+
+    alice_signature_valid = verify_signature(alice_rsa_public_key, alice_dh_public_bytes, alice_signature)
+    bob_signature_valid = verify_signature(bob_rsa_public_key, bob_dh_public_bytes, bob_signature)
+
+    alice_shared_key = generate_shared_key(alice_dh_private_key, bob_dh_public_key)
+    bob_shared_key = generate_shared_key(bob_dh_private_key, alice_dh_public_key)
+
+    output_text.insert(tk.END, f"Prime (p): {p}\n")
+    output_text.insert(tk.END, f"Generator (g): {g}\n\n")
+    output_text.insert(tk.END, f"Alice's DH Public Key:\n{alice_dh_public_bytes.decode()}\n")
+    output_text.insert(tk.END, f"Bob's DH Public Key:\n{bob_dh_public_bytes.decode()}\n\n")
+    output_text.insert(tk.END, f"Alice's Signature: {alice_signature.hex()}\n")
+    output_text.insert(tk.END, f"Bob's Signature: {bob_signature.hex()}\n\n")
+    output_text.insert(tk.END, f"Alice's Signature Valid: {alice_signature_valid}\n")
+    output_text.insert(tk.END, f"Bob's Signature Valid: {bob_signature_valid}\n\n")
+    output_text.insert(tk.END, f"Alice's Shared Key: {alice_shared_key.hex()}\n")
+    output_text.insert(tk.END, f"Bob's Shared Key: {bob_shared_key.hex()}\n")
+    output_text.insert(tk.END, f"Shared Keys Match: {alice_shared_key == bob_shared_key}\n")
+    output_text.config(state=tk.DISABLED)
+
+
+# Set up the GUI
+root = tk.Tk()
+root.title("Secure Diffie-Hellman Key Exchange")
+
+frame = tk.Frame(root, bg="lightblue")
+frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+title_label = tk.Label(frame, text="Secure Diffie-Hellman Key Exchange", font=("Arial", 16), bg="lightblue")
+title_label.pack(pady=10)
+
+param_frame = tk.Frame(frame, bg="lightblue")
+param_frame.pack(pady=10)
+
+key_size_label = tk.Label(param_frame, text="Key Size:", font=("Arial", 12), bg="lightblue")
+key_size_label.grid(row=0, column=0, padx=5, pady=5)
+key_size_var = tk.StringVar(value="2048")
+key_size_entry = ttk.Combobox(param_frame, textvariable=key_size_var, values=["1024", "2048"], state="readonly",
+                              font=("Arial", 12))
+key_size_entry.grid(row=0, column=1, padx=5, pady=5)
+
+button_frame = tk.Frame(frame, bg="lightblue")
+button_frame.pack(pady=10)
+
+start_button = tk.Button(button_frame, text="Start Key Exchange", command=start_key_exchange, font=("Arial", 12),
+                         bg="white", fg="black")
+start_button.grid(row=0, column=0, padx=5, pady=5)
+
+output_text = scrolledtext.ScrolledText(frame, wrap=tk.WORD, width=80, height=20, font=("Arial", 10))
+output_text.pack(pady=10, fill=tk.BOTH, expand=True)
+output_text.config(state=tk.DISABLED)
+
+root.mainloop()
+
